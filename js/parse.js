@@ -2,12 +2,14 @@
 // from a printed roster) into players, in the order they appear.
 
 const GRADE_WORDS = {
+  '7': '7th', '7th': '7th', seventh: '7th',
+  '8': '8th', '8th': '8th', eighth: '8th',
   fr: 'Fr', fresh: 'Fr', freshman: 'Fr', '9': 'Fr', '9th': 'Fr',
   so: 'So', soph: 'So', sophomore: 'So', '10': 'So', '10th': 'So',
   jr: 'Jr', junior: 'Jr', '11': 'Jr', '11th': 'Jr',
   sr: 'Sr', senior: 'Sr', '12': 'Sr', '12th': 'Sr',
 };
-export const GRADE_SPOKEN = { Fr: 'freshman', So: 'sophomore', Jr: 'junior', Sr: 'senior' };
+export const GRADE_SPOKEN = { '7th': 'seventh-grade', '8th': 'eighth-grade', Fr: 'freshman', So: 'sophomore', Jr: 'junior', Sr: 'senior' };
 
 // Longest phrases first so "right side hitter" wins over "right side".
 const POS_PHRASES = [
@@ -32,7 +34,7 @@ export function positionSpoken(pos) {
 }
 
 function normGrade(g) {
-  const k = String(g || '').toLowerCase().replace(/\./g, '').trim();
+  const k = String(g || '').toLowerCase().replace(/\./g, '').replace(/\b(grade|gr)\b/g, '').trim();
   return GRADE_WORDS[k] || '';
 }
 
@@ -80,8 +82,8 @@ function parseFree(line) {
   if (m) { number = m[1]; s = s.slice(m[0].length); }
   else if ((m = s.match(/(?:#|\bno\.?\s*)(\d{1,2})\b/i))) { number = m[1]; s = s.replace(m[0], ' '); }
 
-  const gm = s.match(/\b(freshman|sophomore|junior|senior|fresh|soph|fr|so|jr|sr)\b\.?|\b(9|10|11|12)th\b/i);
-  if (gm) { grade = normGrade(gm[1] || gm[2]); s = s.replace(gm[0], ' '); }
+  const gm = s.match(/\b(freshman|sophomore|junior|senior|fresh|soph|seventh|eighth|fr|so|jr|sr)\b\.?(?:\s+grade\b)?|\b([7-9]|1[0-2])th\b(?:\s+grade\b)?|\bgr(?:ade|\.)?\s*([7-9]|1[0-2])\b/i);
+  if (gm) { grade = normGrade(gm[1] || gm[2] || gm[3]); s = s.replace(gm[0], ' '); }
 
   const pos = takePosition(s); s = pos.rest;
 
@@ -90,10 +92,10 @@ function parseFree(line) {
     if (tm) { number = tm[1]; s = s.replace(tm[0], ' '); }
   }
   if (!grade) {
-    const g2 = s.match(/\b(9|10|11|12)\b/);
+    const g2 = s.match(/\b([7-9]|1[0-2])\b/);
     if (g2 && number) { grade = normGrade(g2[1]); s = s.replace(g2[0], ' '); }
   }
-  s = s.replace(/\b\d+\b/g, ' ');                       // leftover numbers (weights, years)
+  s = s.replace(/\b\d+(st|nd|rd|th)?\b/gi, ' ');        // leftover numbers (weights, years, ordinals)
   return { number, name: cleanName(s), grade, position: pos.position };
 }
 

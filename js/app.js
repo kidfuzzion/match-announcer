@@ -345,7 +345,7 @@ function drawTeams() {
               <div class="r-main">
                 <div class="r-name"><input type="text" aria-label="Name" data-bind="player:${t.id}:${p.id}|name" value="${esc(p.name)}" placeholder="First Last"></div>
                 <select aria-label="Grade" data-bind="player:${t.id}:${p.id}|grade">
-                  ${['', 'Fr', 'So', 'Jr', 'Sr'].map(g => `<option value="${g}" ${p.grade === g ? 'selected' : ''}>${g ? gradeSpoken(g).replace(/^./, c => c.toUpperCase()) : 'Grade'}</option>`).join('')}
+                  ${['', '7th', '8th', 'Fr', 'So', 'Jr', 'Sr'].map(g => `<option value="${g}" ${p.grade === g ? 'selected' : ''}>${!g ? 'Grade' : /th$/.test(g) ? g + ' grade' : gradeSpoken(g).replace(/^./, c => c.toUpperCase())}</option>`).join('')}
                 </select>
                 <input type="text" aria-label="Position" list="positions" data-bind="player:${t.id}:${p.id}|position" value="${esc(p.position)}" placeholder="Position">
               </div>
@@ -893,7 +893,12 @@ async function startSession(b) {
   window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (h && h !== current) go(h); });
   window.addEventListener('beforeunload', () => { store.saveNow(); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') store.saveNow(); });
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    // When a new version is published, reload once to pick it up (never in the middle of a session).
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !run.started) location.reload(); });
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
 })();
 
 void uid;

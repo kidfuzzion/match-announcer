@@ -1,6 +1,6 @@
 // Offline support: the whole app is cached on first visit so it runs in airplane mode.
 // Bump VERSION whenever app files change so devices pick up the update.
-const VERSION = 'ma-v1';
+const VERSION = 'ma-v2';
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/state.js', 'js/parse.js', 'js/names.js', 'js/script.js', 'js/voice.js', 'js/show.js', 'js/pack.js',
@@ -10,7 +10,7 @@ const FILES = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
