@@ -5,6 +5,9 @@ import { store } from './state.js';
 import { getClip, speakDevice } from './voice.js';
 import { allLines } from './script.js';
 
+// A tenth of a second of silence, used to unlock an <audio> element during the Start tap on iPhone.
+const SILENT_WAV = 'data:audio/wav;base64,UklGRmQGAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YUAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
 const sleep = (s, signal) => new Promise((resolve, reject) => {
   if (signal && signal.aborted) return reject(new DOMException('Stopped', 'AbortError'));
   const t = setTimeout(resolve, Math.max(0, s) * 1000);
@@ -13,7 +16,7 @@ const sleep = (s, signal) => new Promise((resolve, reject) => {
 
 export class Show {
   constructor(ui) {
-    this.ui = ui;               // { line(text, label, via), progress(frac), state() }
+    this.ui = { warn() {}, ...ui };  // { line(text, label, via), progress(frac), state(), warn(msg) }
     this.ctx = null;
     this.buffers = new Map();   // line text → AudioBuffer
     this.anthem = null; this.music = null;
@@ -25,6 +28,11 @@ export class Show {
 
   // Must be called from a tap: unlocks audio on iPhone, keeps the screen on, decodes everything.
   async start(onStatus = () => {}) {
+    // The anthem plays through its own <audio> element, separate from the Web Audio mixer, so it
+    // still plays if the iPhone's built-in voice has interrupted the mixer. Unlock it now, inside the tap.
+    if (!this.anthemEl) { this.anthemEl = new Audio(); this.anthemEl.preload = 'auto'; this.anthemEl.playsInline = true; }
+    this.anthemEl.src = SILENT_WAV;
+    const unlock = this.anthemEl.play().then(() => this.anthemEl.pause()).catch(() => {});
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!this.ctx) {
       this.ctx = new AC();
@@ -32,7 +40,9 @@ export class Show {
       this.musicGain = this.ctx.createGain(); this.musicGain.gain.value = 0; this.musicGain.connect(this.master);
       this.voiceGain = this.ctx.createGain(); this.voiceGain.connect(this.master);
       this.anthemGain = this.ctx.createGain(); this.anthemGain.connect(this.master);
+      this.ctx.onstatechange = () => { if (this.ctx.state !== 'running' && this.playing) this.interruptedDuring = true; };
     }
+    this.warnedInterrupt = false;
     // Play even when the iPhone's ring/silent switch is set to silent (Safari 16.4+).
     try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
     await this.ctx.resume();
@@ -47,7 +57,25 @@ export class Show {
     const S = store.state.settings, F = store.state.files;
     const problems = [];
     onStatus('Loading anthem and music…');
-    this.anthem = F.anthem ? await this.decodeKey('anthem', problems, 'anthem') : null;
+    await unlock;
+    this.anthemReady = false;
+    if (F.anthem) {
+      const blob = await db.get('blobs', 'anthem');
+      if (!blob) problems.push('The anthem file is missing. Load it again on the Match screen.');
+      else {
+        if (this.anthemUrl) URL.revokeObjectURL(this.anthemUrl);
+        this.anthemUrl = URL.createObjectURL(blob);
+        this.anthemEl.src = this.anthemUrl;
+        this.anthemEl.load();
+        this.anthemReady = await new Promise(res => {
+          const ok = () => { cleanup(); res(true); }, bad = () => { cleanup(); res(false); };
+          const cleanup = () => { this.anthemEl.removeEventListener('canplaythrough', ok); this.anthemEl.removeEventListener('loadedmetadata', ok); this.anthemEl.removeEventListener('error', bad); };
+          this.anthemEl.addEventListener('canplaythrough', ok); this.anthemEl.addEventListener('loadedmetadata', ok); this.anthemEl.addEventListener('error', bad);
+          setTimeout(ok, 4000);
+        });
+        if (!this.anthemReady) problems.push('The anthem file could not be read. Try an MP3 or M4A file.');
+      }
+    }
     this.music = F.music ? await this.decodeKey('music', problems, 'home music') : null;
 
     this.buffers.clear();
@@ -88,6 +116,13 @@ export class Show {
     this.ready = false;
   }
 
+  // iPhone can leave the mixer "interrupted" (for example after its built-in voice speaks). Try to resume it.
+  async ensureRunning() {
+    if (this.ctx.state === 'running') return true;
+    try { await Promise.race([this.ctx.resume(), sleep(1.5)]); } catch {}
+    return this.ctx.state === 'running';
+  }
+
   ramp(gainNode, target, secs) {
     const now = this.ctx.currentTime, g = gainNode.gain;
     g.cancelScheduledValues(now);
@@ -100,7 +135,9 @@ export class Show {
     src.buffer = buf; src.connect(dest);
     if (opts.loop) { src.loop = true; src.loopStart = opts.offset || 0; src.loopEnd = buf.duration; }
     const ended = new Promise((resolve, reject) => {
-      src.onended = () => resolve();
+      src.onended = () => { clearTimeout(guard); resolve(); };
+      // If the mixer gets suspended, "ended" never fires; don't let the cue hang forever.
+      const guard = opts.loop ? 0 : setTimeout(resolve, (buf.duration - (opts.offset || 0) + 3) * 1000);
       if (signal) signal.addEventListener('abort', () => { try { src.stop(); } catch {} reject(new DOMException('Stopped', 'AbortError')); }, { once: true });
     });
     src.start(0, Math.min(opts.offset || 0, Math.max(0, buf.duration - 0.1)));
@@ -111,6 +148,7 @@ export class Show {
     const buf = this.buffers.get(step.text);
     const S = store.state.settings;
     if (buf) {
+      await this.ensureRunning();
       this.ui.line(step.text, step.label, 'clip');
       const { src, ended } = this.playBuffer(buf, this.voiceGain, signal);
       this.voiceSrc = src;
@@ -118,6 +156,16 @@ export class Show {
     } else {
       this.ui.line(step.text, step.label, S.engine === 'elevenlabs' ? 'fallback' : 'device');
       await speakDevice(step.text, signal);
+      // The iPhone's built-in voice can pause the music mixer. Bring it back right away.
+      if (this.ctx.state !== 'running') {
+        const ok = await this.ensureRunning();
+        if (this.musicSrc && !this.warnedInterrupt) {
+          this.warnedInterrupt = true;
+          this.ui.warn(ok
+            ? "The iPhone's built-in voice is pausing the music while it speaks. ElevenLabs clips avoid this."
+            : "The iPhone's built-in voice stopped the music. ElevenLabs clips avoid this.");
+        }
+      }
     }
   }
 
@@ -156,13 +204,13 @@ export class Show {
           case 'wait': await sleep(st.s, signal); break;
           case 'hold': await this.waitIfPaused(signal); break;
           case 'anthem':
-            if (!this.anthem) { this.ui.line('No anthem file loaded. Load one on the Match screen.', 'Anthem', 'note'); break; }
-            this.anthemGain.gain.value = 1;
+            if (!this.anthemReady) { this.ui.line('No anthem file loaded. Load one on the Match screen.', 'Anthem', 'note'); break; }
             this.ui.line('National anthem', 'Playing file', 'music');
-            { const { src, ended } = this.playBuffer(this.anthem, this.anthemGain, signal); this.anthemSrc = src; await ended; this.anthemSrc = null; }
+            await this.playAnthem(signal);
             break;
           case 'musicStart':
             if (!this.music) break;
+            await this.ensureRunning();
             this.stopMusic();
             this.musicGain.gain.cancelScheduledValues(this.ctx.currentTime);
             this.musicGain.gain.setValueAtTime(0, this.ctx.currentTime);
@@ -195,6 +243,17 @@ export class Show {
     }
   }
 
+  playAnthem(signal) {
+    const el = this.anthemEl;
+    el.currentTime = 0; el.volume = 1;
+    return new Promise((resolve, reject) => {
+      const done = () => { el.removeEventListener('ended', done); el.removeEventListener('error', done); resolve(); };
+      el.addEventListener('ended', done); el.addEventListener('error', done);
+      signal.addEventListener('abort', () => { el.pause(); el.removeEventListener('ended', done); reject(new DOMException('Stopped', 'AbortError')); }, { once: true });
+      el.play().catch(err => { this.ui.warn(`The anthem could not start (${err.name}). Tap Replay to try again.`); done(); });
+    });
+  }
+
   stopMusic() {
     if (this.musicSrc) { try { this.musicSrc.stop(); } catch {} this.musicSrc = null; }
   }
@@ -205,6 +264,7 @@ export class Show {
     if ('speechSynthesis' in window) speechSynthesis.cancel();
     if (this.voiceSrc) { try { this.voiceSrc.stop(); } catch {} this.voiceSrc = null; }
     if (this.anthemSrc) { try { this.anthemSrc.stop(); } catch {} this.anthemSrc = null; }
+    if (this.anthemEl) this.anthemEl.pause();
     if (this.musicSrc && this.ctx) {
       if (hard) this.stopMusic();
       else { const src = this.musicSrc; this.ramp(this.musicGain, 0, 1); setTimeout(() => { try { src.stop(); } catch {} if (this.musicSrc === src) this.musicSrc = null; }, 1100); }

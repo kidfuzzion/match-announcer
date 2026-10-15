@@ -1,6 +1,6 @@
 // Offline support: the whole app is cached on first visit so it runs in airplane mode.
 // Bump VERSION whenever app files change so devices pick up the update.
-const VERSION = 'ma-v2';
+const VERSION = 'ma-v3';
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/state.js', 'js/parse.js', 'js/names.js', 'js/script.js', 'js/voice.js', 'js/show.js', 'js/pack.js',

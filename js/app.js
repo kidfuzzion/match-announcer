@@ -867,6 +867,7 @@ async function startSession(b) {
     },
     progress: (f) => { run.progress = f; const m = $('#meter'); if (m) m.style.width = Math.round(f * 100) + '%'; },
     state: () => updateRunControls(),
+    warn: (msg) => toast(msg, 8000),
   });
   try {
     const res = await run.show.start(msg => { if (status) status.textContent = msg; });
