@@ -234,7 +234,7 @@ async function generateClips(statusEl) {
   for (let i = 0; i < lines.length; i++) {
     if (statusEl) statusEl.textContent = `Generating ${i + 1} of ${lines.length}…`;
     try { const r = await ensureClip(lines[i]); if (!r.cached) made++; }
-    catch (e) { fail(e); if (statusEl) statusEl.textContent = `Stopped at ${i + 1} of ${lines.length}.`; return false; }
+    catch (e) { fail(e); if (statusEl) statusEl.textContent = `Stopped at ${i + 1} of ${lines.length}: ${e.message || e}`; return false; }
   }
   toast(made ? `Generated ${made} new clips.` : 'All clips were already ready.');
   return true;
@@ -762,11 +762,16 @@ function drawRun() {
           <span class="chip ${r.total && r.approved === r.total ? 'ok' : 'bad'}">${r.approved} of ${r.total} names approved</span>
           <span class="chip ${s.files.anthem || s.match.anthemMode === 'live' ? 'ok' : 'warn'}">${s.match.anthemMode === 'live' ? 'Live anthem' : s.files.anthem ? 'Anthem loaded' : 'No anthem file'}</span>
           <span class="chip ${s.files.music ? 'ok' : 'warn'}">${s.files.music ? 'Music loaded' : 'No home music'}</span>
-          <span class="chip">${s.settings.engine === 'elevenlabs' ? 'ElevenLabs voice' : 'Device voice'}</span>
+          <span class="chip" id="run-clip-chip">${s.settings.engine === 'elevenlabs' ? 'ElevenLabs voice' : 'Device voice'}</span>
         </div>
         <button class="go" data-act="run-start">Start session<small>Unlocks audio and keeps the screen on</small></button>
         <p class="hint" id="run-status" style="margin-top:10px"></p>
       </section>`;
+    if (s.settings.engine === 'elevenlabs') clipStatus(allLines()).then(st => {
+      const c = $('#run-clip-chip'); if (!c) return;
+      c.className = 'chip ' + (st.ready === st.total ? 'ok' : 'warn');
+      c.textContent = `${st.ready} of ${st.total} ElevenLabs clips ready`;
+    });
     return;
   }
 
@@ -858,6 +863,23 @@ async function startSession(b) {
   if (!homeTeam() || !visitorTeam()) { if (!confirm('Tonight\'s home team or opponent isn\'t set. Start anyway?')) return; }
   b.disabled = true;
   const status = $('#run-status');
+  // Offer to generate any missing ElevenLabs clips before the session starts.
+  if (S().settings.engine === 'elevenlabs') {
+    if (status) status.textContent = 'Checking voice clips…';
+    const st = await clipStatus(allLines());
+    const missing = st.total - st.ready;
+    if (missing) {
+      if (!elevenReady()) {
+        toast('ElevenLabs is selected but has no API key or voice. Those lines will use the device voice.', 6000);
+      } else if (!navigator.onLine) {
+        toast(`${missing} lines have no ElevenLabs clip, and this device is offline. Those lines will use the device voice.`, 7000);
+      } else if (confirm(`${missing} of ${st.total} lines don't have ElevenLabs clips yet (about ${st.missingChars.toLocaleString()} characters). Generate them now?\n\nWithout them, those lines use the device voice.`)) {
+        const ok = await generateClips(status);
+        if (!ok) { b.disabled = false; return; }
+      }
+    }
+    if (status) status.textContent = '';
+  }
   if (!run.show) run.show = new Show({
     line: (text, label, via) => {
       run.line = text; run.label = label; run.via = via;
