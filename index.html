@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Match Announcer</title>
+  <meta name="description" content="Pre-match PA announcer for high school volleyball: welcome, anthem, rosters, and closing.">
+  <meta name="theme-color" content="#1D4E7A">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Announcer">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="icons/icon-192.png" alt="" width="28" height="28">
+      <span>Match Announcer</span>
+    </div>
+    <div class="matchup" id="matchup"></div>
+  </header>
+
+  <nav class="tabs" id="tabs" aria-label="Sections">
+    <button data-view="match">Match</button>
+    <button data-view="teams">Teams</button>
+    <button data-view="names">Names</button>
+    <button data-view="script">Script</button>
+    <button data-view="voice">Voice</button>
+    <button data-view="run" class="tab-run">Run</button>
+  </nav>
+
+  <main id="view" tabindex="-1"></main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
